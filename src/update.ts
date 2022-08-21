@@ -1,7 +1,7 @@
 import { Env } from '.'
-import { arrayBufferToBase64, base64ToArrayBuffer } from './utils/base64'
 
 const CACHE_TIMEOUT = 300e3 // 5 min
+const CACHE_CHUNK = 26214400
 const CACHE_KEY_T = 'time'
 const CACHE_KEY_V = 'version'
 const CACHE_KEY_C = 'content'
@@ -32,6 +32,44 @@ export default class Update {
     this.env = null
   }
 
+  private concatBuffer(buf1: ArrayBuffer, buf2: ArrayBuffer): ArrayBuffer {
+    const tmp = new Uint8Array(buf1.byteLength + buf2.byteLength)
+    tmp.set(new Uint8Array(buf1), 0)
+    tmp.set(new Uint8Array(buf2), buf1.byteLength)
+    return tmp.buffer
+  }
+
+  private async putString(kv: KVNamespace, key: string, value: string): Promise<void> {
+    await this.clearString(kv, key)
+
+    const chunks = Math.ceil(value.length / CACHE_CHUNK)
+    await kv.put(`${key}_s`, chunks.toString())
+
+    for (let i = 0; i < chunks; i++) await kv.put(`${key}_c${i}`, value.slice(i * CACHE_CHUNK, (i + 1) * CACHE_CHUNK))
+  }
+
+  private async getString(kv: KVNamespace, key: string): Promise<string | null> {
+    const chunks = Number(await kv.get(`${key}_s`, 'text'))
+
+    let buf = ''
+    for (let i = 0; i < chunks; i++) {
+      const chunk = await kv.get(`${key}_c${i}`, 'text')
+      if (chunk == null) return null
+      buf += chunk
+    }
+
+    return buf
+  }
+
+  private async clearString(kv: KVNamespace, key: string): Promise<void> {
+    const chunks = Number(await kv.get(`${key}_s`, 'text'))
+    if (chunks <= 0) return
+
+    for (let i = 0; i < chunks; i++) await kv.delete(`${key}_c${i}`)
+
+    await kv.delete(`${key}_s`)
+  }
+
   private async saveToCache(content: UpdateContent): Promise<void> {
     const { env } = this
     if (env == null) return
@@ -39,12 +77,15 @@ export default class Update {
     const { Cache } = env
 
     const { v, c, s } = content
-    if (v == null || c == null || s == null) return
+    if (v == null) return
 
     await Cache.put(CACHE_KEY_T, Date.now().toString())
     await Cache.put(CACHE_KEY_V, v.toString())
-    await Cache.put(CACHE_KEY_C, base64ToArrayBuffer(c))
-    await Cache.put(CACHE_KEY_S, base64ToArrayBuffer(s))
+
+    if (c == null || s == null) return
+
+    await this.putString(Cache, CACHE_KEY_C, c)
+    await this.putString(Cache, CACHE_KEY_S, s)
   }
 
   private async fetch(): Promise<UpdateContent | null> {
@@ -66,6 +107,25 @@ export default class Update {
     return <UpdateContent>data
   }
 
+  private async fetchVersion(): Promise<number | null> {
+    const { env } = this
+    if (env == null) return null
+
+    const { HOST_URL } = env
+
+    const rsp = await fetch(`${HOST_URL}/version`)
+    if (rsp.status !== 200) return null
+
+    const { code, msg, data } = await rsp.json()
+    if (code !== UpdateApiRetcode.SUCC || data == null) throw new Error(msg)
+
+    const { v } = <UpdateContent>data
+    if (v == null) throw new Error('Invalid data')
+
+    await this.saveToCache(<UpdateContent>data)
+    return v
+  }
+
   setEnv(env: Env) {
     if (this.env === env) return
     this.env = env
@@ -85,10 +145,14 @@ export default class Update {
 
     const cacheTime = Number(await Cache.get(CACHE_KEY_T, 'text'))
     const cacheVersion = Number(await Cache.get(CACHE_KEY_V, 'text'))
-    const cacheContent = await Cache.get(CACHE_KEY_C, 'arrayBuffer')
-    const cacheSign = await Cache.get(CACHE_KEY_S, 'arrayBuffer')
+    const cacheContent = await this.getString(Cache, CACHE_KEY_C)
+    const cacheSign = await this.getString(Cache, CACHE_KEY_S)
 
-    if (Date.now() - cacheTime < CACHE_TIMEOUT && cacheContent != null && cacheSign != null) return cacheVersion
+    if (
+      cacheContent != null &&
+      cacheSign != null &&
+      (Date.now() - cacheTime < CACHE_TIMEOUT || await this.fetchVersion() === cacheVersion)
+    ) return cacheVersion
 
     content = await this.fetch()
     if (content == null) return null
@@ -104,14 +168,18 @@ export default class Update {
 
     const cacheTime = Number(await Cache.get(CACHE_KEY_T, 'text'))
     const cacheVersion = Number(await Cache.get(CACHE_KEY_V, 'text'))
-    const cacheContent = await Cache.get(CACHE_KEY_C, 'arrayBuffer')
-    const cacheSign = await Cache.get(CACHE_KEY_S, 'arrayBuffer')
+    const cacheContent = await this.getString(Cache, CACHE_KEY_C)
+    const cacheSign = await this.getString(Cache, CACHE_KEY_S)
 
-    if (Date.now() - cacheTime < CACHE_TIMEOUT && cacheContent != null && cacheSign != null) {
+    if (
+      cacheContent != null &&
+      cacheSign != null &&
+      (Date.now() - cacheTime < CACHE_TIMEOUT || await this.fetchVersion() === cacheVersion)
+    ) {
       return {
         v: cacheVersion,
-        c: arrayBufferToBase64(cacheContent),
-        s: arrayBufferToBase64(cacheSign)
+        c: cacheContent,
+        s: cacheSign
       }
     }
 
