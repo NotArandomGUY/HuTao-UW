@@ -2,5 +2,8 @@ name = "hutao-uw"
 main = "src/index.ts"
 compatibility_date = "2022-08-20"
 kv_namespaces = [
-  { binding = "Cache", id = "<YOUR_ID>" }
+  { binding = "Cache", id = "<YOUR_ID>", preview_id = "<YOUR_PREVIEW_ID>" }
 ]
+
+[vars]
+HOST_URL = "<HOST_URL>"
