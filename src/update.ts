@@ -145,14 +145,8 @@ export default class Update {
 
     const cacheTime = Number(await Cache.get(CACHE_KEY_T, 'text'))
     const cacheVersion = Number(await Cache.get(CACHE_KEY_V, 'text'))
-    const cacheContent = await this.getString(Cache, CACHE_KEY_C)
-    const cacheSign = await this.getString(Cache, CACHE_KEY_S)
 
-    if (
-      cacheContent != null &&
-      cacheSign != null &&
-      (Date.now() - cacheTime < CACHE_TIMEOUT || await this.fetchVersion() === cacheVersion)
-    ) return cacheVersion
+    if (Date.now() - cacheTime < CACHE_TIMEOUT || await this.fetchVersion() === cacheVersion) return cacheVersion
 
     content = await this.fetch()
     if (content == null) return null
