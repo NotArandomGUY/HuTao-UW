@@ -77,12 +77,10 @@ export default class Update {
     const { Cache } = env
 
     const { v, c, s } = content
-    if (v == null) return
+    if (v == null || c == null || s == null) return
 
     await Cache.put(CACHE_KEY_T, Date.now().toString())
     await Cache.put(CACHE_KEY_V, v.toString())
-
-    if (c == null || s == null) return
 
     await this.putString(Cache, CACHE_KEY_C, c)
     await this.putString(Cache, CACHE_KEY_S, s)
@@ -122,7 +120,6 @@ export default class Update {
     const { v } = <UpdateContent>data
     if (v == null) throw new Error('Invalid data')
 
-    await this.saveToCache(<UpdateContent>data)
     return v
   }
 
