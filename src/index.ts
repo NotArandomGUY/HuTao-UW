@@ -60,6 +60,13 @@ export default {
 			rsp.data = undefined
 		}
 
-		return new Response(JSON.stringify(rsp), { headers: { 'content-type': 'application/json' } })
+		return new Response(JSON.stringify(rsp), {
+			headers: {
+				'Content-Type': 'application/json',
+				'Access-Control-Allow-Origin': '*',
+				'Access-Control-Allow-Methods': '*',
+				'Access-Control-Allow-Headers': '*'
+			}
+		})
 	}
 }
